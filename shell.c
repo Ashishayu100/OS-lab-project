@@ -47,7 +47,7 @@ void parse_line(char *line, char **args, char **input_file, char **output_file) 
  * Function: execute_command
  * (Unchanged)
  */
-void execute_command(char **args, char *input_file, char *output_file) {
+void execute_command(char **args, char *input_file, char *output_file,int background) {
     pid_t pid = fork();
 
     if (pid == 0) {
@@ -71,8 +71,15 @@ void execute_command(char **args, char *input_file, char *output_file) {
     } else if (pid < 0) {
         perror("fork");
     } else {
-        int status;
-        waitpid(pid, &status, 0);
+        // --- Parent Process Logic Updated ---
+        if (background == 1) {
+            // If background, print the PID and DO NOT wait
+            printf("[Running in background] PID: %d\n", pid);
+        } else {
+            // Normal mode: Wait for child
+            int status;
+            waitpid(pid, &status, 0);
+        }
     }
 }
 
@@ -192,6 +199,32 @@ void execute_pipe(char *cmd1, char *cmd2) {
     waitpid(pid2, NULL, 0);
 }
 
+// Function to handle built-in commands like cd and exit
+// Returns 1 if a built-in command was executed, 0 otherwise
+int handle_builtin(char **args) {
+    // Handle "exit"
+    if (strcmp(args[0], "exit") == 0) {
+        exit(0);
+    }
+
+    // Handle "cd"
+    if (strcmp(args[0], "cd") == 0) {
+        // If no directory is provided (just "cd"), go to HOME
+        if (args[1] == NULL) {
+            chdir(getenv("HOME")); 
+        } 
+        else {
+            // Try to change to the specified directory
+            if (chdir(args[1]) != 0) {
+                perror("cd"); // Print error if folder doesn't exist
+            }
+        }
+        return 1; // We executed a built-in
+    }
+
+    return 0; // Not a built-in
+}
+
 
 // --- MAIN FUNCTION IS UNCHANGED FROM PREVIOUS STEP ---
 
@@ -240,7 +273,28 @@ int main() {
             if (args[0] == NULL) {
                 continue;
             }
-            execute_command(args, input_file, output_file);
+
+            // --- NEW: CHECK FOR BUILT-INS ---
+            // If handle_builtin returns 1, we successfully ran cd or exit.
+            // So we continue to the next loop and skip execute_command.
+            if (handle_builtin(args) == 1) {
+                continue;
+            }
+
+            // --- NEW: CHECK FOR BACKGROUND '&' ---
+            int background = 0;
+            int i = 0;
+            // Find the last argument
+            while (args[i] != NULL) {
+                i++;
+            }
+            // Check if the last arg is "&"
+            if (i > 0 && strcmp(args[i-1], "&") == 0) {
+                background = 1;
+                args[i-1] = NULL; // Remove the "&" so execvp doesn't see it
+            }
+
+            execute_command(args, input_file, output_file,background);
         
         }
         // if (pipe_found == -1), error already printed
