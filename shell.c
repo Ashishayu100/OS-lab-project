@@ -10,20 +10,70 @@
 #define DELIMITERS " \t\n"
 #define HISTORY_SIZE 10
 
-// --- ANSI COLOR CODES (For the fancy prompt) ---
+// --- ANSI COLOR CODES ---
 #define COLOR_RESET "\033[0m"
 #define COLOR_GREEN "\033[1;32m"
 #define COLOR_BLUE  "\033[1;34m"
 #define COLOR_CYAN  "\033[1;36m"
+#define COLOR_RED   "\033[1;31m"
+#define COLOR_MAGENTA "\033[1;35m"
 
-// Global History
 char *history[HISTORY_SIZE];
 int history_count = 0;
 
+// --- NEW: Helper to fetch system info from /proc ---
+void print_file_content(const char *filename, const char *label) {
+    FILE *f = fopen(filename, "r");
+    if (f) {
+        char buffer[256];
+        if (fgets(buffer, sizeof(buffer), f)) {
+            // Remove newline
+            buffer[strcspn(buffer, "\n")] = 0;
+            printf(COLOR_MAGENTA "%-10s: " COLOR_RESET "%s\n", label, buffer);
+        }
+        fclose(f);
+    }
+}
+
 /*
- * Function: add_to_history
- * Adds a command to the history buffer.
+ * Function: cmd_sysinfo
+ * ADVANCED FEATURE: Reads kernel info from the /proc filesystem
  */
+void cmd_sysinfo() {
+    printf("\n" COLOR_CYAN);
+    printf("   _____      _____ _          _ _ \n");
+    printf("  / ____|    / ____| |        | | |\n");
+    printf(" | |   ______| (___ | |__   ___| | |\n");
+    printf(" | |  |______|\\___ \\| '_ \\ / _ \\ | |\n");
+    printf(" | |____      ____) | | | |  __/ | |\n");
+    printf("  \\_____|    |_____/|_| |_|\\___|_|_|\n");
+    printf(COLOR_RESET "\n");
+
+    printf(COLOR_GREEN "--- System Information ---\n" COLOR_RESET);
+    
+    // Read Kernel Version
+    print_file_content("/proc/version", "Kernel");
+    
+    // Read CPU Info (First line of model name)
+    FILE *cpu = fopen("/proc/cpuinfo", "r");
+    if (cpu) {
+        char line[256];
+        while (fgets(line, sizeof(line), cpu)) {
+            if (strncmp(line, "model name", 10) == 0) {
+                char *p = strchr(line, ':');
+                if (p) {
+                    p += 2; // Skip ": "
+                    p[strcspn(p, "\n")] = 0;
+                    printf(COLOR_MAGENTA "%-10s: " COLOR_RESET "%s\n", "CPU", p);
+                    break;
+                }
+            }
+        }
+        fclose(cpu);
+    }
+    printf("--------------------------\n\n");
+}
+
 void add_to_history(char *cmd) {
     if (history_count < HISTORY_SIZE) {
         history[history_count++] = strdup(cmd);
@@ -36,10 +86,6 @@ void add_to_history(char *cmd) {
     }
 }
 
-/*
- * Function: print_history
- * Prints stored commands.
- */
 void print_history() {
     printf(COLOR_CYAN "\n--- Command History ---\n" COLOR_RESET);
     for (int i = 0; i < history_count; i++) {
@@ -48,58 +94,47 @@ void print_history() {
     printf(COLOR_CYAN "-----------------------\n" COLOR_RESET);
 }
 
-/*
- * Function: print_help
- * NEW: Adds bulk and documentation to your project.
- */
 void print_help() {
-    printf("\n");
-    printf(COLOR_CYAN "C-SHELL HELP MANUAL" COLOR_RESET "\n");
+    printf("\n" COLOR_CYAN "C-SHELL HELP MANUAL" COLOR_RESET "\n");
     printf("-------------------\n");
-    printf("Built by Group 5 for OS Project\n\n");
     printf(COLOR_GREEN "Internal Commands:" COLOR_RESET "\n");
-    printf("  cd <dir>    : Change the directory to <dir>.\n");
-    printf("  exit        : Quit the shell.\n");
-    printf("  history     : Show the last 10 commands used.\n");
-    printf("  help        : Show this manual.\n\n");
-    printf(COLOR_GREEN "Features:" COLOR_RESET "\n");
-    printf("  * Redirection : command > file (output), command < file (input)\n");
-    printf("  * Pipes       : command1 | command2\n");
-    printf("  * Background  : command &\n");
+    printf("  sysinfo     : Show system/kernel details (Advanced).\n");
+    printf("  cd <dir>    : Change directory.\n");
+    printf("  history     : Show last 10 commands.\n");
+    printf("  exit        : Quit shell.\n");
     printf("-------------------\n");
 }
 
-/*
- * Function: handle_sigint
- * Catch Ctrl+C (SIGINT)
- */
 void handle_sigint(int sig) {
-    printf("\n"); // Move to a new line
-    // We don't print the prompt here because the loop will do it
+    printf("\n");
 }
 
 /*
  * Function: print_prompt
- * NEW: Prints a professional prompt: user@cwd >
+ * ADVANCED FEATURE: Smart Path Replacement (~)
  */
 void print_prompt() {
     char cwd[1024];
-    char *username = getenv("USER"); // Get current user name
-    
+    char *username = getenv("USER");
+    char *home = getenv("HOME");
+
     if (getcwd(cwd, sizeof(cwd)) != NULL) {
-        // Print in format: [USER: DIR] >
-        // \033[1;32m is Green, \033[1;34m is Blue
-        printf(COLOR_GREEN "[%s" COLOR_RESET ":" COLOR_BLUE "%s]" COLOR_RESET " > ", 
-               username ? username : "user", cwd);
+        // Check if cwd starts with home
+        if (home && strncmp(cwd, home, strlen(home)) == 0) {
+            // Print [user: ~/folder]
+            printf(COLOR_GREEN "[%s" COLOR_RESET ":" COLOR_BLUE "~%s]" COLOR_RESET " > ", 
+                   username, cwd + strlen(home));
+        } else {
+            // Print full path
+            printf(COLOR_GREEN "[%s" COLOR_RESET ":" COLOR_BLUE "%s]" COLOR_RESET " > ", 
+                   username, cwd);
+        }
     } else {
         printf("> ");
     }
     fflush(stdout);
 }
 
-/*
- * Function: parse_line (Standard)
- */
 void parse_line(char *line, char **args, char **input_file, char **output_file) {
     int i = 0;
     char *token;
@@ -125,9 +160,6 @@ void parse_line(char *line, char **args, char **input_file, char **output_file) 
     args[i] = NULL;
 }
 
-/*
- * Function: handle_builtin (Updated with Help)
- */
 int handle_builtin(char **args) {
     if (strcmp(args[0], "exit") == 0) {
         for (int i = 0; i < history_count; i++) free(history[i]);
@@ -151,17 +183,18 @@ int handle_builtin(char **args) {
         print_help();
         return 1;
     }
+    if (strcmp(args[0], "sysinfo") == 0) {
+        cmd_sysinfo();
+        return 1;
+    }
     return 0;
 }
 
-/*
- * Function: execute_command (Standard)
- */
 void execute_command(char **args, char *input_file, char *output_file, int background) {
     pid_t pid = fork();
 
     if (pid == 0) {
-        signal(SIGINT, SIG_DFL); // Child handles signals normally
+        signal(SIGINT, SIG_DFL);
 
         if (output_file != NULL) {
             int fd_out = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -177,7 +210,8 @@ void execute_command(char **args, char *input_file, char *output_file, int backg
         }
         
         if (execvp(args[0], args) == -1) {
-            perror("Command not found");
+            // Print error in RED
+            fprintf(stderr, COLOR_RED "Error: Command '%s' not found.\n" COLOR_RESET, args[0]);
             exit(EXIT_FAILURE);
         }
     } else if (pid < 0) {
@@ -191,9 +225,6 @@ void execute_command(char **args, char *input_file, char *output_file, int backg
     }
 }
 
-/*
- * Function: parse_for_pipe (Standard)
- */
 int parse_for_pipe(char *line, char **cmd1, char **cmd2) {
     char *pipe_char = strchr(line, '|');
     if (pipe_char != NULL) {
@@ -205,9 +236,6 @@ int parse_for_pipe(char *line, char **cmd1, char **cmd2) {
     return 0;
 }
 
-/*
- * Function: execute_pipe (Standard)
- */
 void execute_pipe(char *cmd1, char *cmd2) {
     int pipefd[2];
     pid_t pid1, pid2;
@@ -257,8 +285,7 @@ int main() {
     signal(SIGINT, handle_sigint);
 
     while (1) {
-        // NEW: Print the fancy prompt
-        print_prompt();
+        print_prompt(); // New Smart Prompt
 
         read = getline(&line, &len, stdin);
 
